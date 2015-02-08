@@ -1,5 +1,16 @@
 *.o
 test
+openzwave-server
 OZW_log.txt
 make_log.txt
 zw*.xml
+*/*.ini
+settings.js
+.DS_Store
+.idea/**
+bower_components/
+
+*.crt
+*.csr
+*.key
+*.key.org

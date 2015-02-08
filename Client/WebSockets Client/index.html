@@ -1,0 +1,383 @@
+<!--Decided to use Polymer instead of Drupal to style the page with some responsive design. Check out the Polymer Client.
+Will still work on this one if I find the time and use for it. Polymer will become the main client.-->
+<!DOCTYPE html>
+<html>
+    <head>
+		<link type="text/css" rel="stylesheet" href="http://code.jquery.com/ui/1.10.4/themes/smoothness/jquery-ui.css"/>
+		<link type="text/css" rel="stylesheet" href="//netdna.bootstrapcdn.com/font-awesome/4.0.3/css/font-awesome.min.css"/>
+		<link type="text/css" rel="stylesheet" href="stylesheet.css"/>
+		<script src="settings.js"></script>
+        <script src="http://code.jquery.com/jquery-2.1.0.min.js"></script>
+		<script src="http://code.jquery.com/ui/1.10.4/jquery-ui.min.js"></script>
+		<script src="http://cdn.jsdelivr.net/raphael/2.1.2/raphael-min.js"></script>
+		<script src="http://cdn.jsdelivr.net/justgage/1.0.1/justgage.min.js"></script>
+        </head>
+    <body>
+		<div id="menu" class="menu-container">
+			<ul class="navigation">
+				<li>
+					<a href="#" class="to top">
+						<i class="fa fa-lightbulb-o"></i>
+						<span>Rooms</span>
+					</a>
+				</li>
+				<li>
+					<a href="#" class="to bottom">
+						<i class="fa fa-cog"></i>
+						<span>Controller</span>
+					</a>
+				</li>
+			</ul>
+		</div>
+		<div id="rest">
+			<h1>Open-Zwave client</h1>
+			<h2>Websocket status</h2>
+			<input type="text" />
+			<button id="Send">Send Test Message</button>
+			<div id="content">
+				<div class="Rooms">
+				</div>
+				<div class="room-content">
+					<div id="tabs" class="tabs-bottom">
+						<ul>
+							<li><a href="#tab-devices">Devices</a></li>
+							<li><a href="#tab-temperature">Temperature</a></li>
+						</ul>
+						<div class="tabs-spacer"></div>
+						<div id="tab-devices"></div>
+						<div id="tab-temperature">
+							<div class="temp-buttons">
+								<div class="temp-button">
+									<button id="plus-button">+</button>
+								</div>
+								<div class="temp-button">
+									<button id="minus-button">-</button>
+								</div>
+							</div>
+							<div class="gauges">
+								<div class="gauge" id="current-temp"></div>
+								<div class="gauge" id="setpoint-temp"></div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+		
+		<script type="text/javascript">
+			var nodeInfo = [];
+			var Rooms = [];
+			var clientID;
+			window.WebSocket = window.WebSocket || window.MozWebSocket;
+			var websocket;
+			var currentTemp;
+			var setpointTemp;
+			var currentRoom;
+			
+            $(document).ready(function() {
+				stylizePage();
+				
+                websocket = new WebSocket('ws://'+server_ip+':'+port, 'open-zwave');
+				try {
+					websocket.onopen = function () {
+						$('h2').html('Connected!');
+						Init();
+						GetDeviceList();
+					};
+					websocket.onerror = function (error) {
+						$('h2').html('Error Connecting! Have you set the Openzwave-server-ip in this index.html file?');
+						console.log("error: " + error.data);
+					};
+					websocket.onmessage = function (message) {
+						console.log(message.data);
+						var splitresponse = message.data.split("|");
+						var command = splitresponse[0];
+						//console.log(command);
+						var commandSwitch = {
+							"UPDATE": function() {
+								websocket.send('ALIST');
+								websocket.send('ROOMLIST');
+								sleep(25, Refresh);
+							},
+							"ALIST": function() {
+								var devices = splitresponse[1].split("#");
+								$.each(devices, function(index, deviceString) {
+									var splitDeviceString = deviceString.split("~");
+									var splitValueString = splitDeviceString[6].split("<>");
+									var values = {};
+									$.each(splitValueString, function(i, valueString) {
+										var keyvaluepair = valueString.split("=");
+										values[keyvaluepair[0]] = keyvaluepair[1];
+									});
+									var device = {
+										Name: splitDeviceString[1],
+										ID: splitDeviceString[2],
+										Location: splitDeviceString[3],
+										Type: splitDeviceString[4],
+										LastSeen: splitDeviceString[5],
+										Values: values,
+									};
+									var exists = false;
+									$.each(nodeInfo, function() {
+										if (this.ID == device.ID) {
+											this.Name = device.Name;
+											this.Location = device.Location;
+											this.Type = device.Type;
+											this.LastSeen = device.LastSeen;
+											this.Values = device.Values;
+											exists = true;
+										}
+									});
+									if(!exists) {	
+										nodeInfo.push(device);
+									}
+								});
+							},
+							"ROOMLIST": function() {
+								var roomlistresponse = splitresponse[1].split("#");
+								$.each(roomlistresponse, function(index, roomString) {
+									var splitRoomString = roomString.split("~");
+									var room = {
+										Name: splitRoomString[1],
+										currentSetpoint: splitRoomString[2],
+										currentTemp: splitRoomString[3],
+									};
+									var exists = false;
+									$.each(Rooms, function() {
+										if (this.Name == room.Name) {
+											this.currentSetpoint = room.currentSetpoint;
+											this.currentTemp = room.currentTemp;
+											exists = true;
+										}
+									});
+									if(!exists) {
+										Rooms.push(room);
+									}
+								});
+							},
+							"ROOM": function() {
+								var roomresponse = splitresponse[1].split("~");
+								$.each(Rooms, function() {
+									if (this.Name == roomresponse[0]) {
+										this.currentSetpoint = roomresponse[1];
+										this.currentTemp = roomresponse[2];
+									}
+								});
+								Refresh();
+							},
+							"SWITCH": function() {
+								//alert( "boo baz :(" );
+							},
+							"default": function() {
+								//alert( "everything else is just ok" );
+							}
+						};
+						
+						if ( commandSwitch[command] ) {
+							commandSwitch[command]();
+						}
+						else {
+							commandSwitch["default"]();
+						}
+					};
+					websocket.onclose = function (event) {
+						$('h2').html('Closed with code: ' + event.code + " " + event.reason + "<br />");
+					};
+				}
+				catch(exception) {
+					alert('Error' + exception);
+				}
+            });
+			
+			function stylizePage() {
+				/* --------------------------------------------------
+					set the tabs
+				-------------------------------------------------- */
+				$( "#tabs" ).tabs({active: 1, show: { effect: "drop", duration: 200 }});
+				/* --------------------------------------------------
+					fix the classes
+				-------------------------------------------------- */
+				$( ".tabs-bottom .ui-tabs-nav, .tabs-bottom .ui-tabs-nav > *" )
+				.removeClass( "ui-corner-all ui-corner-top" )
+				.addClass( "ui-corner-bottom" );
+				/* --------------------------------------------------
+					move the nav to the bottom
+				-------------------------------------------------- */
+				$( ".tabs-bottom .ui-tabs-nav" ).appendTo( ".tabs-bottom" );
+				
+				currentTemp = new JustGage({
+					id: "current-temp",
+					value: 0,
+					min: 10,
+					max: 35,
+					title: "Current temperature"
+				});
+				setpointTemp = new JustGage({
+					id: "setpoint-temp",
+					value: 0,
+					min: 10,
+					max: 35,
+					title: "Setpoint temperature"
+				});
+			};
+			
+			function Init() {
+				/* --------------------------------------------------
+					register button actions
+				-------------------------------------------------- */
+				console.log("Init");
+				$("#Send").click(function(e) {
+                    e.preventDefault();
+                    websocket.send($('input').val());
+                    $('input').val('');
+                });
+				$("#plus-button").click(function(e) {
+                    e.preventDefault();
+					var room = this.className.split(/\s/).filter(function( cn ) {
+						return cn.indexOf('room-') === 0;
+					})[0].replace("room-", "");
+					websocket.send("ROOM~PLUS~"+room);
+                });
+				$("#minus-button").click(function(e) {
+                    e.preventDefault();
+                    var room = this.className.split(/\s/).filter(function( cn ) {
+						return cn.indexOf('room-') === 0;
+					})[0].replace("room-", "");
+					websocket.send("ROOM~MINUS~"+room);
+                });
+			}
+			
+			function GetDeviceList() {
+				websocket.send('ALIST');
+				websocket.send('ROOMLIST');
+				
+				/*if(navigator.geolocation) {
+					navigator.geolocation.getCurrentPosition(
+						function(position) {
+							// Log that this is the initial position.
+							console.log("Initial Position Found");
+							websocket.send("NEW_CLIENT~"+position.coords.latitude+"~"+position.coords.longitude);
+						},
+						function(error) {
+							console.log("Something went wrong: ", error);
+						},
+						{
+							timeout: (5 * 1000),
+							maximumAge: (1000 * 60 * 15),
+							enableHighAccuracy: true
+						}
+					);
+					var positionTimer = navigator.geolocation.watchPosition(
+						function(position) {
+							// Log that a newer, perhaps more accurate
+							// position has been found.
+							console.log("Newer Position Found");
+							websocket.send("UPDATE_CLIENT~"+position.coords.latitude+"~"+position.coords.longitude);
+						}
+					);
+
+					// If the position hasn't updated within 5 minutes, stop
+					// monitoring the position for changes.
+					setTimeout(
+						function(){
+							// Clear the position watcher.
+							navigator.geolocation.clearWatch(positionTimer);
+						},
+						(1000 * 60 * 5)
+					);
+				}*/
+				
+				sleep(25, Display);
+			};
+			
+			function sleep(millis, callback) {
+				setTimeout(function(){
+					callback();
+				}, millis);
+			};
+			
+			function Display() {
+				$(".Rooms").html("");
+				$.each(Rooms, function(index, room) {
+					$(".Rooms").append("<button class=\"Room\" id=\""+room.Name+"\">"+room.Name+"</button>");
+				});
+				$("button").button();
+				$(".Room").click(function(e) {
+					e.preventDefault();
+					currentRoom = e.currentTarget.id;
+					
+					/* --------------------------------------------------
+						clear the current content
+					-------------------------------------------------- */
+					$("#tab-devices").html("");
+					
+					var currentRoomTemp = 0;
+					var currentSetpoint = 0;
+					
+					$.each(Rooms, function(index, room) {
+						if(room.Name == e.currentTarget.id) {
+							currentRoomTemp = room.currentTemp;
+							currentSetpoint = room.currentSetpoint;
+						}
+					});
+					
+					/* --------------------------------------------------
+						add the switches/dimmers to the devices tab here
+					-------------------------------------------------- */
+					$.each(nodeInfo, function(index, device) {
+						console.log(device);
+						if(device.Location == e.currentTarget.id && device.Type == "Multilevel Power Switch") {
+							$("#tab-devices").append("<div class=\"Device\" id=\""+device.ID+"\"><h3>"+device.Name+"</h3><div class=\"slider\" id=\""+device.ID+"\"></div><div class=\"currentLevel\" id=\""+device.ID+"\">"+device.Values.Level+"</div></div>");
+							
+							$("#"+device.ID+".slider").slider({min: 0, max: 99, range: "min", value: device.Values.Level,
+								start: function (event, ui) {
+									$("#"+device.ID+".slider").data( 'clicked', true );
+								},
+								stop: function (event, ui) {
+									$("#"+device.ID+".currentLevel").empty().append(ui.value);
+									websocket.send("SETNODE~"+device.ID+"~Level="+ui.value)
+									$("#"+device.ID+".slider").data( 'clicked', false );
+								}
+							});
+						}
+					});
+					
+					/* --------------------------------------------------
+						build the temperature tab here
+					-------------------------------------------------- */
+					currentTemp.refresh(currentRoomTemp);
+					setpointTemp.refresh(currentSetpoint);
+					
+					$("#plus-button").removeClass (function (index, css) {
+						return (css.match (/\broom-\S+/g) || []).join(' ');
+					}).addClass("room-"+e.currentTarget.id);
+					$("#minus-button").removeClass (function (index, css) {
+						return (css.match (/\broom-\S+/g) || []).join(' ');
+					}).addClass("room-"+e.currentTarget.id);
+				});
+			};
+			
+			function Refresh() {
+				// refresh the temperature tab
+				var currentRoomTemp = 0;
+				var currentSetpoint = 0;
+				$.each(Rooms, function(index, room) {
+					if(room.Name == currentRoom) {
+						currentRoomTemp = room.currentTemp;
+						currentSetpoint = room.currentSetpoint;
+					}
+				});
+				currentTemp.refresh(currentRoomTemp);
+				setpointTemp.refresh(currentSetpoint);
+				
+				//refresh the devices tab
+				$.each(nodeInfo, function(index, device) {
+					if(device.Location == currentRoom && device.Type == "Multilevel Power Switch") {
+						$("#"+device.ID+".currentLevel").empty().append(device.Values.Level);
+						$("#"+device.ID+".slider").slider( "option", "value", device.Values.Level);
+					}
+				});
+			};
+        </script>
+    </body>
+</html>

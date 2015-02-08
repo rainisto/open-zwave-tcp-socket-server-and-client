@@ -1,0 +1,29 @@
+{
+  "name": "Polymer Client",
+  "version": "0.0.1",
+  "homepage": "https://github.com/wburgers/Open-Zwave-Socket-Server",
+  "license": "MIT",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "polymer": "Polymer/polymer",
+    "core-elements": "Polymer/core-elements",
+    "paper-elements": "Polymer/paper-elements",
+    "raphael": "git://github.com/wburgers/raphael.git#master",
+    "justgage-bower": "git://github.com/wburgers/justgage.git#master"
+  },
+  "resolutions": {
+    "raphael": "master"
+  },
+  "description": "Polymer Client for the Open-Zwave-Socket-Server",
+  "main": "index.html",
+  "authors": [
+    "Willem Burgers"
+  ]
+}

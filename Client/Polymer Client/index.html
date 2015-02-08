@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<script src="bower_components/webcomponentsjs/webcomponents.js"></script>
+		<script src="settings.js"></script>
+		<link rel="import" href="bower_components/core-toolbar/core-toolbar.html">
+		<link rel="import" href="bower_components/core-menu/core-menu.html">
+		<link rel="import" href="bower_components/core-item/core-item.html">
+		<link rel="import" href="bower_components/core-header-panel/core-header-panel.html">
+		<link rel="import" href="bower_components/core-drawer-panel/core-drawer-panel.html">
+		<link rel="import" href="bower_components/font-roboto/roboto.html">
+		<link rel="import" href="bower_components/core-icons/core-icons.html">
+		<link rel="import" href="bower_components/paper-icon-button/paper-icon-button.html">
+		<link rel="import" href="bower_components/paper-menu-button/paper-menu-button.html">
+		<link rel="import" href="bower_components/paper-input/paper-input.html">
+		
+		<link rel="import" href="custom_components/status-dot.html">
+		<link rel="import" href="custom_components/room-list.html">
+		<link rel="import" href="custom_components/single-room.html">
+		<link rel="import" href="custom_components/scene-list.html">
+		<link rel="import" href="custom_components/switch-button.html">
+		
+		<style>
+			html,body {
+				height: 100%;
+				margin: 0;
+				background-color: #E5E5E5;
+				font-family: 'Roboto2', sans-serif;
+			}
+			core-header-panel {
+				height: 100%;
+			}
+			.menu-panel {
+				background: #E5E5E5;
+			}
+			core-toolbar {
+				background: #03A9F4;
+				color: black;
+			}
+			#navheader {
+				background-color: #56BA89;
+			}
+			core-toolbar paper-input {
+				font-size: 1em;
+			}
+			.content {
+				padding: 20px;
+			}
+		</style>
+	</head>
+	<body fullbleed unresolved>
+		<core-drawer-panel  responsiveWidth="980px" drawerWidth="200px" id="drawerPanel">
+			<core-header-panel class="menu-panel" drawer>
+				<core-toolbar id="navheader'">
+					<span>Menu</span>
+				</core-toolbar>
+				<core-menu selected="0">
+					<core-item label="Rooms"></core-item>
+					<core-item label="Scenes"></core-item>
+					<core-item label="Controller"></core-item>
+				</core-menu>
+			</core-header-panel>
+			
+			<core-header-panel main>
+				<core-toolbar id="mainheader">
+					<paper-icon-button core-drawer-toggle icon="menu"></paper-icon-button>
+					<span flex>Polymer-Client</span>
+					<status-dot name="Websocket Status" status="Off" id="websocket-status"></status-dot>
+					<paper-input id="sendinput" label="Type commands here..."></paper-input>
+					<switch-button id="switchbutton"></switch-button>
+				</core-toolbar>
+				<div class="content">
+					<room-list id="room-list"></room-list>
+					<single-room id="single-room"></single-room>
+					<scene-list id="scene-list"></scene-list>
+				</div>
+			</core-header-panel>
+		</core-drawer-panel>
+		<script>
+			/*
+			initialize some vars
+			*/
+			window.WebSocket = window.WebSocket || window.MozWebSocket;
+			var websocket;
+			var websocket_status;
+			var switchbutton;
+			var nodeInfo = [];
+			var Rooms = [];
+			var Scenes = [];
+			var single_room;
+			
+			document.addEventListener('polymer-ready', function() {
+				var menu = document.querySelector('core-menu');
+				var room_list = document.getElementById('room-list');
+				single_room = document.getElementById('single-room');
+				var scene_list = document.getElementById('scene-list');
+				websocket_status = document.getElementById('websocket-status');
+				var sendinput = document.getElementById('sendinput');
+				switchbutton = document.getElementById('switchbutton');
+
+				menu.addEventListener('core-select', function() {
+					room_list.show = menu.selected;
+					single_room.show = menu.selected;
+					scene_list.show = menu.selected;
+				});
+
+				document.addEventListener('change-view', function(e) {
+					menu.selected = e.detail.view;
+					single_room.roomName = e.detail.roomName;
+					updateSingleRoom();
+				});
+				
+				document.addEventListener('send-command', function(e) {
+					websocket.send(e.detail.command);
+				});
+				
+				sendinput.addEventListener('change', function() {
+					websocket.send(sendinput.committedValue);
+					sendinput.value = "";
+				});
+				
+				switchbutton.addEventListener('tap', function() {
+					switchbutton.colorChange();
+					websocket.send("SWITCH");
+				});
+
+				room_list.Rooms = Rooms;
+				room_list.show = menu.selected;
+
+				single_room.Devices = nodeInfo;
+				single_room.show = menu.selected;
+				
+				scene_list.Scenes = Scenes;
+				scene_list.show = menu.selected;
+
+				open_websocket();
+			});
+			
+			function open_websocket() {
+				websocket = new WebSocket('ws://'+server_ip+':'+port, 'open-zwave');
+				try {
+					websocket.onopen = function () {
+						websocket_status.color = 'green';
+						websocket_status.status = 'Connected';
+						//Init();
+						GetDeviceList();
+					};
+					websocket.onerror = function (error) {
+						websocket_status.color = 'red';
+						websocket_status.status = 'Error Check console';
+						console.log("error: " + error.data);
+					};
+					websocket.onmessage = function (message) {
+						console.log(message.data);
+						var splitresponse = message.data.split("|");
+						var command = splitresponse[0];
+						//console.log(command);
+						var commandSwitch = {
+							"UPDATE": function() {
+								GetDeviceList();
+								//sleep(25, Refresh);
+							},
+							"ALIST": function() {
+								var devices = splitresponse[1].split("#");
+								while(nodeInfo.length > 0) {
+									nodeInfo.pop();
+								}
+								devices.forEach( function(deviceString) {
+									var splitDeviceString = deviceString.split("~");
+									var splitValueString = splitDeviceString[6].split("<>");
+									var values = {};
+									splitValueString.forEach( function(valueString) {
+										var keyvaluepair = valueString.split("=");
+										values[keyvaluepair[0]] = keyvaluepair[1];
+									});
+									var device = {
+										Name: splitDeviceString[1],
+										ID: splitDeviceString[2],
+										Location: splitDeviceString[3],
+										Type: splitDeviceString[4],
+										LastSeen: splitDeviceString[5],
+										Values: values,
+									};
+									
+									nodeInfo.push(device);
+								});
+							},
+							"ROOMLIST": function() {
+								var roomlistresponse = splitresponse[1].split("#");
+								while(Rooms.length > 0) {
+									Rooms.pop();
+								}
+								roomlistresponse.forEach( function(roomString) {
+									var splitRoomString = roomString.split("~");
+									var room = {
+										Name: splitRoomString[1],
+										currentSetpoint: splitRoomString[2],
+										currentTemp: splitRoomString[3],
+									};
+									Rooms.push(room);
+								});
+								updateSingleRoom();
+							},
+							"ROOM": function() {
+								var roomresponse = splitresponse[1].split("~");
+								Rooms.forEach( function(roomitem) {
+									if (roomitem.Name === roomresponse[0]) {
+										roomitem.currentSetpoint = roomresponse[1];
+										roomitem.currentTemp = roomresponse[2];
+									}
+								});
+							},
+							"SCENELIST": function() {
+								var scenelistresponse = splitresponse[1].split("#");
+								while(Scenes.length > 0) {
+									Scenes.pop();
+								}
+								scenelistresponse.forEach( function(sceneString) {
+									var splitSceneString = sceneString.split("~");
+									var scene = {
+										Name: splitSceneString[1],
+										Active: splitSceneString[2],
+									};
+									Scenes.push(scene);
+								});
+							},
+							"SWITCH": function() {
+							},
+							"ATHOME": function() {
+								switchbutton.atHome = splitresponse[1];
+							},
+							"default": function() {
+							},
+						};
+						
+						if ( commandSwitch[command] ) {
+							commandSwitch[command]();
+						}
+						else {
+							commandSwitch["default"]();
+						}
+					};
+					websocket.onclose = function (event) {
+						websocket_status.color = 'red';
+						websocket_status.status = 'Closed, Check console';
+						console.log("Closed with code: " + event.code + " " + event.reason);
+					};
+				}
+				catch(exception) {
+					alert('Error' + exception);
+				}
+			};
+			function Init() {
+			}
+			function GetDeviceList() {
+				websocket.send("ALIST");
+				websocket.send("ROOMLIST");
+				websocket.send("SCENELIST");
+				websocket.send("ATHOME");
+			}
+			function updateSingleRoom() {
+				if(typeof single_room.roomName != 'undefined' && single_room.roomName !== "") {
+					Rooms.forEach( function(roomItem) {
+						if (roomItem.Name === single_room.roomName) {
+							single_room.room = roomItem;
+						}
+					});
+				}
+			}
+		</script>
+	</body>
+</html>
